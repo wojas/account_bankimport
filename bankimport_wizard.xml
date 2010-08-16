@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+	<data>
+
+		<wizard
+		string="Import Bank statements file"
+		model="account.bank.statement"
+		name="account.bank_import"
+		id="wizard_account_bankimport"
+		/>
+		
+	</data>
+</openerp>

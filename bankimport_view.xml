@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+<data>
+
+	<record model="ir.ui.view" id="view_company_for_bankimport">
+		<field name="name">res.company.form</field>
+		<field name="model">res.company</field>
+		<field name="inherit_id" ref="base.view_company_form"/>
+		<field name="type">form</field>
+		<field name="arch" type="xml">
+			<field name="currency_id" position="after">
+				<separator string="Import Bank Statements" colspan="4"/>		
+				<field name="bank_journalid" />
+				<field name="def_payable" />
+				<field name="def_receivable" />
+				<field name="filters" />
+				<field name="bank_file" />
+			</field>
+		</field>
+	</record>
+	
+	<record model="ir.ui.view" id="view_account_bankimport_form">
+		<field name="name">account.bankimport.form</field>
+		<field name="model">account.bankimport</field>
+		<field name="type">form</field>
+		<field name="arch" type="xml">
+			<form string="Import bank statements">
+				<field name="name" />
+				<field name="journal_id" />
+				<field name="date" />
+				<field name="user_id" />
+				<field name="statement_id"/>
+				<field name="file"/>
+				<field name="note" colspan="4"/>
+			</form>
+		</field>
+	</record>
+
+
+	<record model="ir.ui.view" id="view_account_bankimport_tree">
+		<field name="name">account.bankimport.tree</field>
+		<field name="model">account.bankimport</field>
+		<field name="type">tree</field>
+		<field name="arch" type="xml">
+			<tree string="Import bank statements">
+				<field name="journal_id" />
+				<field name="date" />
+				<field name="user_id" />
+			</tree>
+		</field>
+	</record>
+
+	<record model="ir.actions.act_window" id="action_account_bankimport">
+		<field name="name">Import bank statements</field>
+		<field name="type">ir.actions.act_window</field>
+		<field name="res_model">account.bankimport</field>
+		<field name="view_type">form</field>
+		<field name="view_mode">tree,form</field>
+	</record>
+
+	<menuitem name="Financial Management/Reporting/Bankimport Statements" id="menu_action_account_bankimport" action="action_account_bankimport" sequence="12" />
+
+	<menuitem name="Financial Management/Periodical Processing/Import Bank Statements" action="wizard_account_bankimport" type="wizard"  id="menu_account_bankimport_wizard" sequence="15"/>
+
+	<act_window name="Import Bank Statements"
+		domain="[('statement_id', '=', active_id)]"
+		res_model="account.bankimport"
+		src_model="account.bank.statement"
+		view_type="form"
+		view_mode="tree,form"
+ 		id="act_account_payment_account_bank_statement"/>
+
+
+<!-- View for adding / changing filters -->
+
+
+
+	<record model="ir.ui.view" id="view_account_bankimport_filters_form">
+		<field name="name">account.bankimport.filters.form</field>
+		<field name="model">account.bankimport.filters</field>
+		<field name="type">form</field>
+		<field name="arch" type="xml">
+			<form string="Define import filters">
+				<field name="filter" />
+				<field name="name" />
+			</form>
+		</field>
+	</record>
+
+
+	<record model="ir.ui.view" id="view_account_bankimport_filters_tree">
+		<field name="name">account.bankimport.filters.tree</field>
+		<field name="model">account.bankimport.filters</field>
+		<field name="type">tree</field>
+		<field name="arch" type="xml">
+			<tree string="Import filters">
+				<field name="filter" />
+				<field name="name" />
+			</tree>
+		</field>
+	</record>
+	
+	<record model="ir.actions.act_window" id="action_account_bankimport_filters_tree">
+		<field name="name">Define bankimport filters</field>
+		<field name="res_model">account.bankimport.filters</field>
+		<field name="view_type">form</field>
+		<field name="view_mode">tree,form</field>
+	</record>
+<!--
+	<menuitem name="Financial Management/Reporting/Bankimport Statements" id="menu_account_bankimport" action="action_bank_statement_tree" sequence="12"/>
+-->
+	<menuitem action="action_account_bankimport_filters_tree" id="menu_action_account_bankimport_filters_tree" parent="base.menu_users"/>
+
+
+<!-- **** END ***** --> 
+	
+		
+	</data>
+</openerp>
