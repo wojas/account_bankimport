@@ -18,6 +18,11 @@
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #
 ##############################################################################
+"""
+Supported banks:
+- NL Bizner
+- NL ABN-AMRO
+"""
 
 import sys
 import re
@@ -39,7 +44,7 @@ class Sheet(object):
     # 60F/60M
     start_saldo = None
     start_saldo_date = None
-    # 62M
+    # 62M/62F
     end_saldo = None
     end_saldo_date = None
     # 61 and 86; list of Entry instances
@@ -47,6 +52,14 @@ class Sheet(object):
 
     def __init__(self):
         self.entries = []
+
+    @property
+    def is_nl_abnamro(self):
+        return self.id == 'ABN AMRO BANK NV'
+
+    @property
+    def is_nl_bizner(self):
+        return not self.is_nl_abnamro
 
     def __repr__(self):
         s = ['Sheet:']
@@ -73,27 +86,31 @@ class Entry(object):
         (?P<entry_date>[0-9]{4})?
         (?P<dc>[DC])
         (?P<funds_code>[A-Z])?
-        (?P<amount>[0-9,]{15})
-        (?P<txtype>[0-9A-Z]{4})
+        (?P<amount>[0-9,]{1,15})
+        (?P<txtype>N[0-9A-Z]{3})
         (?P<other_account>[0-9A-Z]{1,16})?
         (?P<other_info>.+?)?
         $
     """
     regexp = re.compile(pattern, re.VERBOSE)
+    r_nl_abnamro_account = re.compile(r"^([0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{3}) (.{19})")
+    r_nl_abnamro_giro = re.compile(r"^GIRO +([0-9]+) (.{17})")
+    r_clean_desc = re.compile(r"[ >]+")
 
+    # 25
+    my_account = None
     # 61
     value_date = None 
-    entry_date = None # optional
-    dc = None # normalized to 'D' or 'C'
-    funds_code = None # optional
-    amount = None # Decimal
-    txtype = None # 4 letter transaction type
-    other_account = None # optional
-    other_info = None # optional
-    # rest of 61 is ignored by us (serving bank, other reference)
+    entry_date = None           # optional
+    dc = None                   # normalized to 'D' or 'C'
+    funds_code = None           # optional
+    amount = None               # Decimal
+    txtype = None               # 4 letter transaction type
+    other_account = None        # optional
+    other_info = None           # optional (serving bank, other reference)
     # 86
-    name = '' # first line from raw description
-    description = '' # compacted
+    name = ''                   # first line from raw description
+    description = ''            # compacted
     description_raw = None
 
     def __init__(self, tag61):
@@ -101,48 +118,78 @@ class Entry(object):
         self.value_date = parse_date(m.group('value_date'))
         ed = m.group('entry_date')
         if ed:
-            # FIXME: we need year wrapping handling here...
-            # I have not been able to test this with Bizner exports
-            raise NotImplementedError('This code has been untested')
+            # FIXME: can this date be in the next year?
             self.entry_date = parse_date(m.group('value_date'), year=self.value_date.year)
         self.dc = m.group('dc')
         self.funds_code = m.group('funds_code')
         self.amount = parse_balance(m.group('amount'))
         self.txtype = m.group('txtype')
-        self.other_account = m.group('other_account')
+        self.other_account = clean_account(m.group('other_account'))
         self.other_info = m.group('other_info')
 
-    def is_atm(self):
-        return 'GELDAUTOMAAT' in self.description_raw 
+    is_atm = None
+    is_pin = None
 
-    def is_pin(self):
-        return 'PINAUTOMAAT' in self.description_raw 
-
+    @property
+    def refself(self):
+        return self.my_account == self.other_account
+    
     def parse86(self, msg):
         self.description_raw = msg
 
-        # this works for Bizner exports, might not work for other banks
-        lines = msg.split('\n')
-        name1 = clean_desc.sub(' ', lines[0].replace('>', ', '))
-        self.name = name1.replace(' ,', ',').strip().rstrip(',').strip()
+        if self.other_account == 'NONREF':
+            # NL ABN-MRO
+            self.is_atm = False
+            self.is_pin = False
+            set_name = False
+            m = self.r_nl_abnamro_account.match(msg)
+            if m:
+                # starts with account number
+                self.other_account = m.group(1).replace('.', '')
+                self.name = m.group(2).strip()
+                set_name = True
+            else:
+                m = self.r_nl_abnamro_giro.match(msg)
+                if m:
+                    # starts with giro number
+                    self.other_account = 'P' + m.group(1)
+                    self.name = m.group(2).strip()
+                    set_name = True
+                else:
+                    # other info
+                    self.is_atm = msg.startswith('GEA ') or msg.startswith('CHIP ')
+                    self.is_pin = msg.startswith('BEA ')
 
-        # get the description
-        remainder = ' '.join(lines[1:])
-        if remainder.strip():
-            # replace one or more ' ' or '>' by a single space
-            self.description = clean_desc.sub(' ', remainder)
-        else:
-            # Bizner uses one line descriptions for administrative transactions
-            self.description = self.name
+            if set_name and self.name=='':
+                self.other_account = clean_account(self.other_account)
+                self.name = msg.split('\n')[0][32:].strip()
 
-        # reverse if it's an ATM withdrawal
-        if self.is_atm():
-            self.name, self.description = self.description, self.name
+            if self.other_account=='NONREF':
+                self.other_account = ''
             
+            # replace one or more ' ' or '>' by a single space
+            self.description = self.r_clean_desc.sub(' ', msg)
+                
+        else:
+            # NL Bizner
+
+            # this works for Bizner exports, might not work for other banks
+            lines = msg.split('\n')
+            name1 = self.r_clean_desc.sub(' ', lines[0].replace('>', ', '))
+            self.name = name1.replace(' ,', ',').strip().rstrip(',').strip()
+
+            # get the description
+            # replace one or more ' ' or '>' by a single space
+            self.description = self.r_clean_desc.sub(' ', msg)
+            
+            self.is_atm = 'GELDAUTOMAAT' in self.description_raw 
+            self.is_pin = 'PINAUTOMAAT' in self.description_raw 
+
     def __repr__(self):
         s = ['Entry:']
         for a in ['value_date', 'entry_date', 'dc', 'funds_code', 'amount', 'txtype', 
-                'other_account', 'name', 'description']:
+                'other_account', 'name', 'description', 'description_raw', 
+                'is_atm', 'is_pin', 'refself']:
             val = getattr(self, a)
             s.append('  %s: %r' % (a, val))
         return '\n'.join(s)
@@ -151,6 +198,18 @@ class Entry(object):
 class MT940ParseError(Exception):
     pass
 
+
+def clean_account(s):
+    """Cleans an account number by removing leading zeros"""
+    if s.startswith('P'):
+        prefix = 'P'
+        number = s[1:]
+    else:
+        prefix = ''
+        number = s
+    while number[0]=='0':
+        number = number[1:]
+    return prefix + number
 
 _cents = Decimal('0.01')
 def parse_balance(s):
@@ -181,8 +240,6 @@ def get_sign(dc):
     else:
         raise ValueError("dc must be 'D' or 'C', not %r" % dc)
 
-clean_desc = re.compile(r"[ >]+")
-
 
 def parse_mt940(f):
     """
@@ -204,7 +261,7 @@ def parse_mt940(f):
         if not line:
             return
         if not line.startswith(':'):
-            raise MT940ParseError('Found garbage at line %i' % lineno)
+            raise MT940ParseError('Found garbage at line %i: "%s"' % (lineno, line))
 
         # split in tag (without colon) and message
         tag, msg = line[1:].split(':', 1)
@@ -225,7 +282,7 @@ def parse_mt940(f):
         if tag=='20':
             sheet.id = msg
         elif tag=='25':
-            sheet.account = msg
+            sheet.account = clean_account(msg)
         elif tag=='28':
             sheet.page = msg
         elif tag in ['60F', '60M', '62F', '62M']:
@@ -243,6 +300,7 @@ def parse_mt940(f):
                 sheet.end_saldo_date = pdate
         elif tag=='61':
             entry = Entry(msg.replace('\n', ' '))
+            entry.my_account = sheet.account
             sheet.entries.append(entry)
         elif tag=='86':
             if not sheet.entries or sheet.entries[-1].description_raw is not None:
@@ -259,6 +317,14 @@ def parse_mt940(f):
     for line in f:
         read_lineno += 1
         line = line.strip()
+        
+        # ABN-AMRO fixes
+        if line=='ABNANL2A' or line=='-':
+            continue
+        if line=='940':
+            line = ':940:'
+        
+        # parse
         if line.startswith(':'):
             # new tag
             process_current_line()
